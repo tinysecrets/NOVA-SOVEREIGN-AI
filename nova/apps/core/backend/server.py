@@ -42,6 +42,23 @@ DEFAULT_PERSONA = (
 )
 
 app = FastAPI()
+_core_cors_origins = [
+    origin.strip()
+    for origin in os.environ.get(
+        "CORS_ORIGINS",
+        "http://127.0.0.1:3002,http://localhost:3002",
+    ).split(",")
+    if origin.strip()
+]
+if "*" in _core_cors_origins:
+    raise RuntimeError("CORS_ORIGINS must list explicit trusted UI origins; wildcards are forbidden")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_core_cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+)
 api_router = APIRouter(prefix="/api")
 
 

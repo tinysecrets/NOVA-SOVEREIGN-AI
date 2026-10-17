@@ -2,7 +2,7 @@
 # ============================================================================
 #  NOVA MASTER — Sovereign AI  ·  one-shot project generator (Fedora-ready)
 #  Free & open: OpenRouter free models · OpenAI-compatible · Open WebUI (podman)
-#  Stack: FastAPI + React (CRA/craco) + MongoDB.  No paid keys, no metering.
+#  Stack: FastAPI + React (Vite 8) + MongoDB. No paid keys, no metering.
 # ============================================================================
 set -euo pipefail
 ROOT="nova-sovereign"
@@ -36,8 +36,10 @@ WORKSPACE.mkdir(parents=True, exist_ok=True)
 def _safe(path: str) -> Path:
     """Resolve a path and guarantee it stays inside the workspace sandbox."""
     p = (WORKSPACE / path).resolve()
-    if not str(p).startswith(str(WORKSPACE)):
-        raise ValueError(f"path escapes workspace: {path}")
+    try:
+        p.relative_to(WORKSPACE)
+    except ValueError as exc:
+        raise ValueError(f"path escapes workspace: {path}") from exc
     return p
 
 
@@ -179,7 +181,24 @@ logger = logging.getLogger("nova")
 MONGO_URL = os.environ["MONGO_URL"]
 DB_NAME = os.environ["DB_NAME"]
 OPENROUTER_BASE_URL = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-DEFAULT_MODEL = os.environ.get("OPENROUTER_MODEL", "nvidia/nemotron-nano-9b-v2:free")
+SAFE_FREE_MODEL = "nvidia/nemotron-3.5-lightning:free"
+
+
+def _is_safe_free_model(value: Optional[str]) -> bool:
+    model = str(value or "").strip().lower()
+    return model.endswith(":free") and not model.startswith("google/")
+
+
+def _safe_free_model(value: Optional[str], fallback: Optional[str] = None) -> str:
+    candidate = str(value or "").strip()
+    if _is_safe_free_model(candidate):
+        return candidate
+    if _is_safe_free_model(fallback):
+        return str(fallback).strip()
+    return SAFE_FREE_MODEL
+
+
+DEFAULT_MODEL = _safe_free_model(os.environ.get("OPENROUTER_MODEL"), SAFE_FREE_MODEL)
 ENV_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 
 client = AsyncIOMotorClient(MONGO_URL)
@@ -254,7 +273,7 @@ ORDER_RE = re.compile(
 async def get_settings() -> Dict[str, Any]:
     doc = await db.settings.find_one({"_id": "app"}) or {}
     key = doc.get("openrouter_api_key") or ENV_KEY
-    model = doc.get("model") or DEFAULT_MODEL
+    model = _safe_free_model(doc.get("model") or DEFAULT_MODEL, DEFAULT_MODEL)
     return {"key": key, "model": model}
 
 
@@ -270,6 +289,7 @@ EXTRA_HEADERS = {"HTTP-Referer": "https://nova.sovereign.ai", "X-Title": "NOVA S
 
 async def complete(llm: AsyncOpenAI, model: str, system: str, messages: List[Dict[str, str]],
                    temperature: float = 0.5, max_tokens: int = 1400) -> str:
+    model = _safe_free_model(model, DEFAULT_MODEL)
     payload = [{"role": "system", "content": system}] + messages
     try:
         resp = await llm.chat.completions.create(
@@ -366,7 +386,10 @@ async def write_settings(req: SettingsRequest):
     if req.openrouter_api_key is not None:
         update["openrouter_api_key"] = req.openrouter_api_key.strip()
     if req.model is not None:
-        update["model"] = req.model.strip()
+        requested_model = req.model.strip()
+        if not _is_safe_free_model(requested_model):
+            raise HTTPException(400, "Only non-Google OpenRouter model IDs ending in :free are permitted.")
+        update["model"] = requested_model
     if update:
         await db.settings.update_one({"_id": "app"}, {"$set": update}, upsert=True)
     s = await get_settings()
@@ -374,10 +397,10 @@ async def write_settings(req: SettingsRequest):
 
 
 FALLBACK_FREE_MODELS = [
+    "nvidia/nemotron-3.5-lightning:free",
     "nvidia/nemotron-nano-9b-v2:free",
     "inclusionai/ling-3.0-flash:free",
     "openai/gpt-oss-20b:free",
-    "google/gemma-4-31b-it:free",
     "meta-llama/llama-3.2-3b-instruct:free",
 ]
 
@@ -400,7 +423,7 @@ async def _fetch_free_models() -> List[str]:
                             and float(getattr(pricing, "completion", 1) or 0) == 0)
                     except (TypeError, ValueError):
                         pass
-                if is_free and mid:
+                if is_free and mid and not mid.lower().startswith("google/"):
                     models.append(mid)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"Could not fetch live models: {e}")
@@ -562,9 +585,8 @@ async def agent_runs():
 
 # ---------- OpenAI-compatible proxy (Open WebUI plugs in here) ----------
 def _enforce_free(model: Optional[str], fallback: str) -> str:
-    if model and (model.endswith(":free") or model == "openrouter/free"):
-        return model
-    return fallback
+    # Every OpenRouter call crosses this gate, including user-selected models.
+    return _safe_free_model(model, _safe_free_model(fallback, DEFAULT_MODEL))
 
 
 @api.get("/v1/models")
@@ -754,7 +776,7 @@ async def system_prove():
 
 app.include_router(api)
 app.add_middleware(CORSMiddleware, allow_credentials=True,
-                   allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+                   allow_origins=[origin.strip() for origin in os.environ.get("CORS_ORIGINS", "http://127.0.0.1:3000,http://localhost:3000").split(",") if origin.strip()],
                    allow_methods=["*"], allow_headers=["*"])
 
 
@@ -777,10 +799,10 @@ TXT_REQ
 cat <<'ENV_BACK' > backend/.env
 MONGO_URL="mongodb://localhost:27017"
 DB_NAME="nova_sovereign"
-CORS_ORIGINS="*"
-OPENROUTER_API_KEY="sk-or-v1-REPLACE_WITH_YOUR_FREE_KEY"
+CORS_ORIGINS="http://127.0.0.1:3000,http://localhost:3000"
+OPENROUTER_API_KEY=""
 OPENROUTER_BASE_URL="https://openrouter.ai/api/v1"
-OPENROUTER_MODEL="nvidia/nemotron-nano-9b-v2:free"
+OPENROUTER_MODEL="nvidia/nemotron-3.5-lightning:free"
 ENV_BACK
 
 # ----------------------------------------------------------------------------
@@ -799,39 +821,43 @@ cat <<'PKG_JSON' > frontend/package.json
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^9.0.1",
-    "react-scripts": "5.0.1",
     "remark-gfm": "^4.0.0"
   },
   "devDependencies": {
-    "@craco/craco": "^7.1.0",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@vitejs/plugin-react": "^6.1.2",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",
-    "tailwindcss": "^3.4.17"
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.3.4"
   },
   "scripts": {
-    "start": "craco start",
-    "build": "craco build"
-  },
-  "browserslist": {
-    "production": [">0.2%", "not dead", "not op_mini all"],
-    "development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]
+    "start": "vite",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
   }
 }
 PKG_JSON
 
-cat <<'CRACO' > frontend/craco.config.js
-const path = require("path");
-module.exports = {
-  webpack: {
-    alias: { "@": path.resolve(__dirname, "src") },
-  },
-};
-CRACO
+cat <<'VITE_CONFIG' > frontend/vite.config.mjs
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+const here = path.dirname(fileURLToPath(import.meta.url));
+export default defineConfig({
+  plugins: [react()],
+  resolve: { alias: { "@": path.resolve(here, "src") } },
+  server: { host: "127.0.0.1", port: 3000, strictPort: true },
+  preview: { host: "127.0.0.1", port: 4173, strictPort: true }
+});
+VITE_CONFIG
 
 cat <<'POSTCSS' > frontend/postcss.config.js
 module.exports = {
   plugins: {
-    tailwindcss: {},
+    "@tailwindcss/postcss": {},
     autoprefixer: {},
   },
 };
@@ -841,7 +867,7 @@ cat <<'TAILWIND' > frontend/tailwind.config.js
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   darkMode: ["class"],
-  content: ["./src/**/*.{js,jsx,ts,tsx}", "./public/index.html"],
+  content: ["./index.html", "./src/**/*.{js,jsx,ts,tsx}"],
   theme: {
     extend: {
       colors: {
@@ -867,11 +893,12 @@ cat <<'JSCONFIG' > frontend/jsconfig.json
 }
 JSCONFIG
 
+rm -f frontend/public/index.html frontend/craco.config.js
 cat <<'ENV_FRONT' > frontend/.env
-REACT_APP_BACKEND_URL=http://localhost:8001
+VITE_BACKEND_URL=http://127.0.0.1:8001
 ENV_FRONT
 
-cat <<'HTML_INDEX' > frontend/public/index.html
+cat <<'HTML_INDEX' > frontend/index.html
 <!DOCTYPE html>
 <html lang="en" class="dark">
   <head>
@@ -887,6 +914,7 @@ cat <<'HTML_INDEX' > frontend/public/index.html
   <body>
     <noscript>You need to enable JavaScript to run NOVA.</noscript>
     <div id="root"></div>
+    <script type="module" src="/src/index.jsx"></script>
   </body>
 </html>
 HTML_INDEX
@@ -894,7 +922,7 @@ HTML_INDEX
 # ----------------------------------------------------------------------------
 # FRONTEND · src
 # ----------------------------------------------------------------------------
-cat <<'JS_INDEX' > frontend/src/index.js
+cat <<'JS_INDEX' > frontend/src/index.jsx
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -938,9 +966,8 @@ cat <<'CSS_APP' > frontend/src/App.css
 CSS_APP
 
 cat <<'CSS_INDEX' > frontend/src/index.css
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../tailwind.config.js";
 
 :root {
   --background: 240 6% 3%;
@@ -1046,7 +1073,7 @@ CSS_INDEX
 cat <<'JS_API' > frontend/src/api.js
 import axios from "axios";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://127.0.0.1:8001";
 export const API = `${BACKEND_URL}/api`;
 
 const http = axios.create({ baseURL: API, timeout: 120000 });
@@ -1954,17 +1981,27 @@ MD_DEPLOY
 # ----------------------------------------------------------------------------
 cat <<'SH_RUN' > run.sh
 #!/usr/bin/env bash
-# NOVA MASTER — dev launcher for Fedora. Starts MongoDB (podman), backend, frontend.
+# NOVA MASTER — self-hosted launcher; API includes filesystem/shell/Git tools.
+# Use loopback or a private Tailscale address only; public exposure requires auth.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BIND_HOST="${NOVA_BIND_HOST:-127.0.0.1}"
+if [[ -z "${NOVA_BIND_HOST:-}" ]] && command -v tailscale >/dev/null 2>&1; then
+  candidate="$(tailscale ip -4 2>/dev/null | head -n 1 || true)"
+  [[ "$candidate" =~ ^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}$ ]] && BIND_HOST="$candidate"
+fi
+if [[ ! "$BIND_HOST" =~ ^127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ && ! "$BIND_HOST" =~ ^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+  echo "ERROR: bind host must be loopback or a Tailscale 100.64.0.0/10 address; refusing $BIND_HOST" >&2
+  exit 1
+fi
 
-echo ">> 1/3  MongoDB (podman)"
+echo ">> 1/3  MongoDB (podman; loopback only)"
 if command -v podman >/dev/null 2>&1; then
   if ! podman ps --format '{{.Names}}' | grep -q '^nova-mongo$'; then
     if podman ps -a --format '{{.Names}}' | grep -q '^nova-mongo$'; then
       podman start nova-mongo
     else
-      podman run -d --name nova-mongo -p 27017:27017 docker.io/library/mongo:7
+      podman run -d --name nova-mongo -p 127.0.0.1:27017:27017 docker.io/library/mongo:7
     fi
   fi
 else
@@ -1977,7 +2014,8 @@ cd "$ROOT/backend"
 source .venv/bin/activate
 pip install -q --upgrade pip
 pip install -q -r requirements.txt
-uvicorn server:app --host 0.0.0.0 --port 8001 > "$ROOT/backend/backend.log" 2>&1 &
+export CORS_ORIGINS="${NOVA_SOVEREIGN_CORS_ORIGINS:-http://${BIND_HOST}:3000,http://127.0.0.1:3000,http://localhost:3000}"
+uvicorn server:app --host "$BIND_HOST" --port 8001 > "$ROOT/backend/backend.log" 2>&1 &
 BACK_PID=$!
 echo "$BACK_PID" > "$ROOT/.backend.pid"
 deactivate || true
@@ -1986,10 +2024,13 @@ echo "   backend pid $BACK_PID (logs: backend/backend.log)"
 cleanup() { echo; echo ">> stopping backend"; kill "$BACK_PID" 2>/dev/null || true; exit 0; }
 trap cleanup INT TERM
 
-echo ">> 3/3  Frontend (CRA :3000)"
+echo ">> 3/3  Frontend (Vite :3000)"
+echo "   NOVA UI:  http://${BIND_HOST}:3000"
+echo "   NOVA API: http://${BIND_HOST}:8001"
 cd "$ROOT/frontend"
 [ -d node_modules ] || npm install
-npm start
+export VITE_BACKEND_URL="${VITE_BACKEND_URL:-http://${BIND_HOST}:8001}"
+npm run dev -- --host "$BIND_HOST" --port 3000
 SH_RUN
 chmod +x run.sh
 
@@ -1998,17 +2039,26 @@ cat <<'GITIGNORE' > .gitignore
 **/.venv/
 **/node_modules/
 **/build/
-backend/backend.log
+**/dist/
+**/.env
+!**/.env.example
+**/*.log
+**/.backend.pid
 backend/agent_workspace/
-.backend.pid
 GITIGNORE
 
 cat <<'MD_README' > README.md
 # NOVA MASTER — Sovereign AI
 
-Free & open AI workspace. Chat + a self-organizing Agent Team + Dashboard,
-running entirely on free OpenRouter models via an OpenAI-compatible gateway.
-Front it with Open WebUI (podman) if you like — same free models.
+Free-first AI workspace. Chat + a self-organizing Agent Team + Dashboard,
+using explicit OpenRouter `:free` model IDs or local Ollama; paid model overrides
+and Google models are rejected. Front it with Open WebUI (podman) if you like.
+
+**Security boundary:** this is a single-owner self-hosted control plane and includes
+filesystem/shell/Git agent tools. Its API does not implement a general user login.
+The launcher binds only to loopback or a private Tailscale address. Keep restrictive
+tailnet ACLs and do not port-forward/publish it publicly until authenticated access
+and least-privilege controls are implemented.
 
 ## Architecture
     podman Open WebUI -> OpenAI-compatible API -> OpenRouter proxy (free)
@@ -2016,23 +2066,21 @@ Front it with Open WebUI (podman) if you like — same free models.
 
 ## Prerequisites (Fedora)
     sudo dnf install -y python3 python3-pip nodejs git podman
-    # nodejs 18+ recommended:  sudo dnf module install nodejs:20/common
+    # Vite 8 needs Node 20.19+ or 22.12+; Node 22.12+ recommended.
 
 ## Setup
-1. Put your free OpenRouter key in backend/.env (OPENROUTER_API_KEY).
-   Get one at https://openrouter.ai/keys and enable free endpoints at
-   https://openrouter.ai/settings/privacy
+1. Optionally add an OpenRouter key in backend/.env (`OPENROUTER_API_KEY`). NOVA only sends requests to model IDs ending in `:free`; without a key it uses local Ollama.
 2. Launch everything:
        ./run.sh
-3. Open http://localhost:3000
+3. Open the UI address printed by `run.sh`. With Tailscale it uses the private Tailscale IPv4 address; otherwise it uses loopback.
 
 ## Optional: Open WebUI
     cd deploy/open-webui && ./start.sh   # -> http://localhost:3080
 
 ## Ports
-- Frontend  http://localhost:3000
-- Backend   http://localhost:8001  (OpenAI-compatible at /api/v1)
-- MongoDB   localhost:27017 (podman container nova-mongo)
+- Frontend  `http://<BIND_HOST>:3000` (private loopback/Tailscale)
+- Backend   `http://<BIND_HOST>:8001` (OpenAI-compatible at /api/v1; private loopback/Tailscale)
+- MongoDB   `127.0.0.1:27017` (podman container nova-mongo)
 MD_README
 
 # ----------------------------------------------------------------------------
@@ -2050,7 +2098,7 @@ echo "       sudo dnf install -y python3 python3-pip nodejs git podman"
 echo ""
 echo "  3) Run it:"
 echo "       cd $ROOT && ./run.sh"
-echo "       -> http://localhost:3000"
+echo "       -> ./run.sh prints the correct loopback/Tailscale UI URL"
 echo ""
 echo "  Optional Open WebUI front-end:"
 echo "       cd $ROOT/deploy/open-webui && ./start.sh   (-> :3080)"

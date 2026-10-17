@@ -1,30 +1,30 @@
-# Free model map — OpenRouter :free primary, Ollama local fallback.
+# Free-first model map. Paid inference is not permitted by this project policy.
+# Remote inference uses an explicit OpenRouter :free model; otherwise use local Ollama.
 default_backend: openrouter_free
 
 openrouter:
-  default: nvidia/nemotron-nano-9b-v2:free
-  # Only *:free IDs are allowed by the API enforcer.
+  default: nvidia/nemotron-3.5-lightning:free
   roles:
-    genie: openrouter/free
-    research: nvidia/nemotron-nano-9b-v2:free
-    design: nvidia/nemotron-nano-9b-v2:free
-    code: nvidia/nemotron-nano-9b-v2:free
-    qa: nvidia/nemotron-nano-9b-v2:free
-    report: nvidia/nemotron-nano-9b-v2:free
-    integration: nvidia/nemotron-nano-9b-v2:free
-    repair: nvidia/nemotron-nano-9b-v2:free
+    genie: nvidia/nemotron-3.5-lightning:free
+    research: nvidia/nemotron-3.5-lightning:free
+    design: nvidia/nemotron-3.5-lightning:free
+    code: nvidia/nemotron-3.5-lightning:free
+    qa: nvidia/nemotron-3.5-lightning:free
+    report: nvidia/nemotron-3.5-lightning:free
+    integration: nvidia/nemotron-3.5-lightning:free
+    repair: nvidia/nemotron-3.5-lightning:free
 
 ollama:
   host: http://127.0.0.1:11434
   num_predict: 4096
-  default: qwen2.5:1.5b
+  default: hermes3:8b
   roles:
-    genie: qwen2.5:1.5b
-    research: qwen2.5:1.5b
-    design: qwen2.5:1.5b
-    code: qwen2.5:1.5b
-    qa: qwen2.5:1.5b
-    report: qwen2.5:1.5b
-    integration: qwen2.5:1.5b
-    repair: qwen2.5:1.5b
-    sidekick: qwen2.5:1.5b
+    genie: hermes3:8b
+    research: hermes3:8b
+    design: hermes3:8b
+    code: hermes3:8b
+    qa: hermes3:8b
+    report: hermes3:8b
+    integration: hermes3:8b
+    repair: hermes3:8b
+    sidekick: hermes3:8b

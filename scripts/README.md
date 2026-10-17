@@ -30,28 +30,29 @@ Stop everything started by the launcher:
 |------|---------|
 | `bootstrap.sh` | Create venvs, install deps, seed `.env` from examples |
 | `start-all.sh` | Start Sovereign, Sidekick, and Core APIs + UIs |
-| `health-check.sh` | Probe local service ports |
+| `health-check.sh` | Probe service ports on the selected private/loopback binding |
 | `stop-all.sh` | Stop processes tracked in `logs/pids/` |
 | `setup/` | Historical setup, repair, upgrade, and import utilities |
 | `logs/` | Archived upgrade log + runtime logs/pids |
 
 ## Canonical ports
 
-| Service | URL |
-|---------|-----|
-| Sovereign UI | http://localhost:3000 |
-| Sidekick UI | http://localhost:5173 |
-| Sovereign API | http://localhost:8000 |
-| Sidekick API | http://localhost:8001 |
-| Core API | http://localhost:8002 |
+The canonical launcher uses the machine's Tailscale IPv4 address when available, otherwise loopback. Use the actual address reported by `start-all.sh`; do not assume `localhost` is reachable from the S22.
+
+| Service | Port | Default binding |
+|---------|------|-----------------|
+| Sovereign UI | 3000 | Tailscale or loopback |
+| Sidekick UI | 5173 | Tailscale or loopback |
+| Core UI | 3002 | Tailscale or loopback |
+| Sovereign API | 8000 | Tailscale or loopback |
+| Sidekick API | 8001 | Tailscale or loopback |
+| Core API | 8002 | Tailscale or loopback |
+| Recruiter API | 8003 | Loopback only |
 
 ## Setup utilities (`setup/`)
 
-These were used during consolidation and remain for reference:
+- `build_nova.sh` — standalone-project generator. It emits the Vite 8 + Tailwind 4 toolchain and uses loopback/private Tailscale binding by default.
+- `NOVA_START_ALL.sh` and `NOVA_HEALTH_CHECK.sh` — compatibility aliases for the canonical launch/health scripts.
+- `onebox_nova_setup.sh`, `NOVA_UPGRADE_FINAL.sh`, `NOVA_FINAL_REPAIR.sh`, `NOVA_LAST_MILE.sh`, `NOVA_FINAL_SWEEP.sh`, and `NOVA_CLEAN_ARCHIVES.sh` are retired fail-closed wrappers. Their original contents are preserved outside the repository at `/home/justin/.local/share/repo-recovery/NOVA-SOVEREIGN-AI/legacy-repair-scripts-20261017/`; do not restore them as normal launchers because they could rewrite Git branches, modify sibling repos, copy private `.env` files into the repository, remove archived projects, or bind APIs to every interface.
 
-- `onebox_nova_setup.sh` — import sibling repos into one workspace
-- `build_nova.sh` — generate / scaffold sovereign app tree
-- `NOVA_UPGRADE_FINAL.sh`, `NOVA_FINAL_REPAIR.sh`, `NOVA_LAST_MILE.sh`, `NOVA_FINAL_SWEEP.sh`, `NOVA_CLEAN_ARCHIVES.sh` — repair passes
-- `NOVA_START_ALL.sh`, `NOVA_HEALTH_CHECK.sh`, `NOVA_FINAL_STATUS.md` — earlier launcher + status notes
-
-Prefer `./scripts/start-all.sh` for day-to-day use; it resolves the consolidated `nova/apps/` layout first.
+Use only `./scripts/bootstrap.sh`, `./scripts/start-all.sh`, `./scripts/health-check.sh`, and `./scripts/stop-all.sh` for normal operation.

@@ -2,17 +2,17 @@
 default_backend: openrouter_free
 
 openrouter:
-  default: nvidia/nemotron-nano-9b-v2:free
+  default: nvidia/nemotron-3.5-lightning:free
   # Only *:free IDs are allowed by the API enforcer.
   roles:
-    genie: openrouter/free
-    research: nvidia/nemotron-nano-9b-v2:free
-    design: nvidia/nemotron-nano-9b-v2:free
-    code: nvidia/nemotron-nano-9b-v2:free
-    qa: nvidia/nemotron-nano-9b-v2:free
-    report: nvidia/nemotron-nano-9b-v2:free
-    integration: nvidia/nemotron-nano-9b-v2:free
-    repair: nvidia/nemotron-nano-9b-v2:free
+    genie: nvidia/nemotron-3.5-lightning:free
+    research: nvidia/nemotron-3.5-lightning:free
+    design: nvidia/nemotron-3.5-lightning:free
+    code: nvidia/nemotron-3.5-lightning:free
+    qa: nvidia/nemotron-3.5-lightning:free
+    report: nvidia/nemotron-3.5-lightning:free
+    integration: nvidia/nemotron-3.5-lightning:free
+    repair: nvidia/nemotron-3.5-lightning:free
 
 ollama:
   host: http://127.0.0.1:11434

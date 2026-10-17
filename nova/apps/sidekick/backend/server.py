@@ -44,7 +44,9 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD") or ""
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "genie_sidekick")
 
-CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()]
+CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173").split(",") if o.strip()]
+if not CORS_ORIGINS or "*" in CORS_ORIGINS:
+    raise RuntimeError("CORS_ORIGINS must contain explicit trusted origins; wildcards are forbidden")
 
 if not JWT_SECRET or len(JWT_SECRET) < 16:
     logger.warning("JWT_SECRET is missing or too short. Set a long random string in .env")
@@ -99,7 +101,7 @@ db = mongo_client[DB_NAME]
 app = FastAPI(title="Genie Sidekick API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS or ["http://localhost:5173"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

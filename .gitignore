@@ -12,9 +12,6 @@ __pycache__/
 *.log
 
 NOVA_BACKUP/
-NOVA_BACKUP/
-__pycache__/
-*.pyc
 
 # Runtime launcher state
 scripts/logs/runtime/
@@ -22,3 +19,8 @@ scripts/logs/pids/
 
 .venv/
 venv/
+
+# Recruiter worker state (never commit prospect data / sends)
+nova/apps/recruiter/data/
+nova/apps/recruiter/*.env
+!nova/apps/recruiter/.env.example

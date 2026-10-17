@@ -68,7 +68,7 @@ def test_vault_loader_tolerates_env_tokens(tmp_path, monkeypatch):
     bundle = km.derive_all(vault_key)
 
     raw = bundle.to_dict()
-    raw["env"] = {"GEMINI_API_KEY": "secret"}
+    raw["env"] = {"OPENROUTER_API_KEY": "test-token"}
     nonce = secrets.token_bytes(12)
     encrypted = AESGCM(vault_key).encrypt(
         nonce,
@@ -111,3 +111,39 @@ def test_genie_plan_parser():
         assert (m.group(1).lower(), m.group(2)) == expected
     assert genie.ORDER_RE.match("[other] nope") is None
     assert genie.ORDER_RE.match("plain text") is None
+
+
+def test_openrouter_free_route_has_priority_over_other_opted_in_tokens(monkeypatch):
+    import agents._llm as llm
+
+    monkeypatch.setattr(llm, "_openrouter_chat", lambda model, *a, **kw: f"ok:{model}")
+    monkeypatch.setattr(llm, "_groq_chat", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("Groq must not outrank OpenRouter free")))
+    result = llm.chat(
+        "genie",
+        "hello",
+        {"OPENROUTER_API_KEY": "test-openrouter-key", "GROQ_API_KEY": "test-groq-key", "HF_TOKEN": "test-hf-token"},
+    )
+    assert result.backend == "openrouter"
+    assert result.model.endswith(":free")
+    assert result.text == f"ok:{result.model}"
+
+
+def test_google_token_never_activates_google_backend(monkeypatch):
+    import agents._llm as llm
+
+    monkeypatch.setattr(llm, "_ollama_chat", lambda *a, **kw: "local response")
+    result = llm.chat("genie", "hello", {"GEMINI_API_KEY": "test-only"})
+    assert result.backend == "ollama"
+    assert result.text == "local response"
+
+
+def test_token_setter_does_not_offer_google(monkeypatch):
+    import importlib.util
+
+    path = ROOT / "scripts" / "set_token.py"
+    spec = importlib.util.spec_from_file_location("nova_set_token_test", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    assert "GEMINI_API_KEY" not in module.VALID
+    assert "OPENROUTER_API_KEY" in module.VALID

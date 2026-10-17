@@ -1,42 +1,20 @@
-# NOVA FINAL STATUS
+# NOVA Platform Status
 
-Provider Stack:
+This file replaces the stale September 2026 repair-era status report. The active source of truth is the repository root README and `scripts/README.md`.
 
-OPENROUTER
-↓
-OLLAMA
-↓
-OPENAI COMPATIBLE
+## Canonical entry points
 
-Completed:
+- Bootstrap dependencies: `./scripts/bootstrap.sh`
+- Start services: `./scripts/start-all.sh`
+- Verify: `./scripts/health-check.sh`
+- Stop: `./scripts/stop-all.sh`
 
-✓ Environment normalization
-✓ Dependency repair
-✓ Frontend recovery
-✓ Backend syntax cleanup
-✓ Launch automation
+## Current design boundaries
 
-Start:
+- Model routing is free-first; OpenRouter choices must end in `:free`, Google is excluded, and the local Ollama model is the no-key path.
+- The default launch interface is loopback or the machine's Tailscale IPv4 address. LAN/wildcard binds are rejected by the canonical launcher.
+- The Recruiter API stays on loopback. Its email sender stays dry-run by default and requires a real postal address, Resend credentials, and a strong signed-unsubscribe setup before any live sending.
+- This is a single-owner self-hosted control plane. The agent-tool API does not yet implement a general user login; keep it on loopback/private Tailscale with restrictive tailnet ACLs. Do not publish it to the internet.
+- Historical repair/import scripts were replaced with fail-closed wrappers; original versions are preserved outside this repository under `/home/justin/.local/share/repo-recovery/NOVA-SOVEREIGN-AI/legacy-repair-scripts-20261017/`.
 
-./scripts/start-all.sh
-
-Ports:
-
-NOVA API:
-8000
-
-GENIE API:
-8001
-
-REAL GENIE:
-8002
-
-NOVA UI:
-3000
-
-GENIE UI:
-5173
-
-Required secret:
-
-OPENROUTER_API_KEY=
+See current test/build output and Git commit history for verified release status. No public deployment or OS reboot is implied by this status note.

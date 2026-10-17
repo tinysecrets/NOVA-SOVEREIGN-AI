@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # NOVA — live health check for the full platform
 set -u
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/scripts/lib/bind-host.sh"
+NOVA_BIND_HOST="$(nova_bind_host "${NOVA_BIND_HOST:-}")" || exit 1
 
 echo "================================="
 echo " NOVA LIVE HEALTH CHECK"
@@ -19,11 +22,12 @@ check() {
   fi
 }
 
-check "SOVEREIGN API" "http://127.0.0.1:8000/api/health"
-check "SIDEKICK API"  "http://127.0.0.1:8001/api/health"
-check "CORE API docs" "http://127.0.0.1:8002/docs"
-check "SOVEREIGN UI"  "http://127.0.0.1:3000"
-check "SIDEKICK UI"   "http://127.0.0.1:5173"
+check "SOVEREIGN API" "http://${NOVA_BIND_HOST}:8000/api/health"
+check "SIDEKICK API"  "http://${NOVA_BIND_HOST}:8001/api/health"
+check "CORE API docs" "http://${NOVA_BIND_HOST}:8002/docs"
+check "SOVEREIGN UI"  "http://${NOVA_BIND_HOST}:3000"
+check "SIDEKICK UI"   "http://${NOVA_BIND_HOST}:5173"
+check "CORE UI"       "http://${NOVA_BIND_HOST}:3002"
 
 echo ""
 echo "================================="

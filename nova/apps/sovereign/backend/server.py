@@ -39,7 +39,31 @@ logger = logging.getLogger("nova")
 MONGO_URL = os.environ["MONGO_URL"]
 DB_NAME = os.environ["DB_NAME"]
 OPENROUTER_BASE_URL = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-DEFAULT_MODEL = os.environ.get("OPENROUTER_MODEL", "nvidia/nemotron-nano-9b-v2:free")
+SAFE_FREE_MODEL = "nvidia/nemotron-3.5-lightning:free"
+
+
+def _is_safe_free_model(value: Optional[str]) -> bool:
+    model = str(value or "").strip().lower()
+    return model.endswith(":free") and not model.startswith("google/")
+
+
+def _safe_free_model(value: Optional[str], fallback: Optional[str] = None) -> str:
+    candidate = str(value or "").strip()
+    if _is_safe_free_model(candidate):
+        return candidate
+    if _is_safe_free_model(fallback):
+        return str(fallback).strip()
+    return SAFE_FREE_MODEL
+
+
+def _explicit_cors_origins(value: Optional[str]) -> list[str]:
+    origins = [origin.strip() for origin in str(value or "").split(",") if origin.strip()]
+    if not origins or "*" in origins:
+        raise RuntimeError("CORS_ORIGINS must contain explicit trusted origins; wildcards are forbidden")
+    return origins
+
+
+DEFAULT_MODEL = _safe_free_model(os.environ.get("OPENROUTER_MODEL"), SAFE_FREE_MODEL)
 ENV_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:1.5b")
@@ -111,7 +135,7 @@ GENIE_SYSTEM = (
 async def get_settings() -> Dict[str, Any]:
     doc = await db.settings.find_one({"_id": "app"}) or {}
     key = doc.get("openrouter_api_key") or ENV_KEY
-    model = doc.get("model") or DEFAULT_MODEL
+    model = _safe_free_model(doc.get("model") or DEFAULT_MODEL, DEFAULT_MODEL)
     return {"key": key, "model": model, "has_key": bool(key)}
 
 
@@ -181,6 +205,7 @@ async def complete(llm: Optional[AsyncOpenAI], model: str, system: str, messages
     if llm is None:
         return await ollama_complete(system, messages, temperature, max_tokens, model=OLLAMA_MODEL)
 
+    model = _safe_free_model(model, DEFAULT_MODEL)
     payload = [{"role": "system", "content": system}] + messages
     texts: List[str] = []
     try:
@@ -316,17 +341,20 @@ async def write_settings(req: SettingsRequest):
     if req.openrouter_api_key is not None:
         update["openrouter_api_key"] = req.openrouter_api_key.strip()
     if req.model is not None:
-        update["model"] = req.model.strip()
+        requested_model = req.model.strip()
+        if not _is_safe_free_model(requested_model):
+            raise HTTPException(400, "Only non-Google OpenRouter model IDs ending in :free are permitted.")
+        update["model"] = requested_model
     if update:
         await db.settings.update_one({"_id": "app"}, {"$set": update}, upsert=True)
     return await read_settings()
 
 
 FALLBACK_FREE_MODELS = [
+    "nvidia/nemotron-3.5-lightning:free",
     "nvidia/nemotron-nano-9b-v2:free",
     "inclusionai/ling-3.0-flash:free",
     "openai/gpt-oss-20b:free",
-    "google/gemma-4-31b-it:free",
     "meta-llama/llama-3.2-3b-instruct:free",
 ]
 
@@ -349,7 +377,7 @@ async def _fetch_free_models() -> List[str]:
                             and float(getattr(pricing, "completion", 1) or 0) == 0)
                     except (TypeError, ValueError):
                         pass
-                if is_free and mid:
+                if is_free and mid and not mid.lower().startswith("google/"):
                     models.append(mid)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"Could not fetch live models: {e}")
@@ -601,9 +629,8 @@ async def agent_runs():
 
 # ---------- OpenAI-compatible proxy (Open WebUI plugs in here) ----------
 def _enforce_free(model: Optional[str], fallback: str) -> str:
-    if model and (model.endswith(":free") or model == "openrouter/free"):
-        return model
-    return fallback
+    # Every OpenRouter call crosses this gate, including user-selected models.
+    return _safe_free_model(model, _safe_free_model(fallback, DEFAULT_MODEL))
 
 
 @api.get("/v1/models")
@@ -802,9 +829,16 @@ async def system_prove():
 
 
 app.include_router(api)
-app.add_middleware(CORSMiddleware, allow_credentials=True,
-                   allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
-                   allow_methods=["*"], allow_headers=["*"])
+_CORS_ORIGINS = _explicit_cors_origins(
+    os.environ.get("CORS_ORIGINS", "http://127.0.0.1:3000,http://localhost:3000")
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=_CORS_ORIGINS,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+)
 
 
 @app.on_event("shutdown")

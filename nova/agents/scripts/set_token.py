@@ -1,13 +1,13 @@
 """
 scripts/set_token.py
 ====================
-Store a free-tier cloud token (GEMINI_API_KEY, GROQ_API_KEY, HF_TOKEN) inside
-the encrypted vault, alongside the derived keys. The vault file is the only
-place these tokens ever live — never committed, never logged.
+Store an explicitly opted-in free-tier provider token inside the encrypted
+vault, alongside the derived keys. The vault file is the only place these tokens
+ever live — never committed, never logged. Google/Gemini is not a supported route.
 
 Usage:
-    python scripts/set_token.py GEMINI_API_KEY
-    # then paste the token at the prompt
+    python scripts/set_token.py OPENROUTER_API_KEY
+    # then paste the token at the prompt; NOVA uses only models ending in :free
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ from keys.key_manager import (  # noqa: E402
     super_key_to_vault_key,
 )
 
-VALID = {"GEMINI_API_KEY", "GROQ_API_KEY", "HF_TOKEN", "OPENROUTER_API_KEY"}
+VALID = {"GROQ_API_KEY", "HF_TOKEN", "OPENROUTER_API_KEY"}
 
 
 def main() -> None:

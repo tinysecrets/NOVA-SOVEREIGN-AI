@@ -20,11 +20,13 @@ ollama serve
 ollama pull qwen2.5:1.5b
 ```
 
-Optional free cloud token:
+Optional free-tier cloud token (the runtime prefers OpenRouter free models; paid model IDs and Google are excluded):
 
 ```bash
-SUPER_KEY='choose-a-long-local-passphrase' python3 scripts/set_token.py GEMINI_API_KEY
+SUPER_KEY='choose-a-long-local-passphrase' python3 scripts/set_token.py OPENROUTER_API_KEY
 ```
+
+The key is stored only in the encrypted local vault. NOVA's OpenRouter model IDs must end in `:free`; without a cloud key, it stays on local Ollama.
 
 ## Run
 
