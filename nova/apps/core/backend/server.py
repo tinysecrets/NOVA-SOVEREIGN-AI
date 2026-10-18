@@ -1,4 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, Cookie, Header
+from fastapi.responses import StreamingResponse
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -25,13 +27,12 @@ logging.basicConfig(
 )
 
 # MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+mongo_url = os.environ.get("MONGO_URL", "mongodb://127.0.0.1:27017")
+client = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=5000)
+db = client[os.environ.get("DB_NAME", "ember")]
 
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')  # kept for backwards compat, unused with Ollama
 OLLAMA_URL = os.environ.get('OLLAMA_URL', 'http://localhost:11434')
-MODEL_NAME = os.environ.get('OLLAMA_MODEL', 'dolphin3')
+MODEL_NAME = os.environ.get('OLLAMA_MODEL', 'hermes3:8b')
 
 EMERGENT_AUTH_SESSION_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
 SESSION_DAYS = 7
@@ -60,6 +61,34 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
 )
 api_router = APIRouter(prefix="/api")
+_background_tasks: set[asyncio.Task] = set()
+
+def _schedule(coro):
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+def _sse(event: str, payload: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+
+def _origin_allowed(request: Request) -> bool:
+    origin = request.headers.get("origin")
+    if not origin:
+        return True
+    if origin in _core_cors_origins:
+        return True
+    try:
+        parsed = urlparse(origin)
+        request_port = request.url.port or (443 if request.url.scheme == "https" else 80)
+        origin_port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        return (
+            parsed.scheme == request.url.scheme
+            and parsed.hostname == request.url.hostname
+            and origin_port == request_port
+        )
+    except Exception:
+        return False
+
 
 
 # ---------- Models ----------
@@ -127,6 +156,8 @@ def now_iso() -> str:
 
 async def get_user_from_request(request: Request, authorization: Optional[str] = Header(None)) -> User:
     """Authenticator: cookie first, then Authorization Bearer header."""
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and not _origin_allowed(request):
+        raise HTTPException(status_code=403, detail="Forbidden origin")
     token: Optional[str] = request.cookies.get("session_token")
     if not token and authorization and authorization.lower().startswith("bearer "):
         token = authorization.split(" ", 1)[1].strip()
@@ -250,10 +281,50 @@ async def extract_memories_async(user_id: str, user_text: str, assistant_text: s
     except Exception as e:
         logger.warning(f"Memory extraction failed: {e}")
 
+
+async def _prepare_chat(user: User, req: ChatRequest):
+    """Resolve/create the conversation, persist the user message, build the prompt."""
+    conv_id = req.conversation_id
+    if conv_id:
+        conv = await db.conversations.find_one({"id": conv_id, "user_id": user.user_id}, {"_id": 0})
+        if not conv:
+            raise HTTPException(404, "Conversation not found")
+    else:
+        conv = Conversation(user_id=user.user_id).model_dump()
+        await db.conversations.insert_one(conv)
+        conv_id = conv["id"]
+
+    user_msg = Message(user_id=user.user_id, conversation_id=conv_id, role="user", content=req.message)
+    await db.messages.insert_one(user_msg.model_dump())
+
+    history = await get_chat_history(user.user_id, conv_id)
+    system_prompt = await build_system_prompt(user)
+
+    # Fold the real prior turns into the system prompt — one LLM call per message, no replay
+    prior = [m for m in history if m["id"] != user_msg.id]
+    if prior:
+        transcript = "\n\n".join(
+            f"{'User' if m['role'] == 'user' else 'Ember'}: {m['content']}" for m in prior
+        )
+        system_prompt += f"\n\n--- This conversation so far ---\n{transcript}"
+
+    return conv, conv_id, user_msg, system_prompt
+
+
+async def _update_conv_title(conv: dict, conv_id: str, user: User, message: str):
+    updates = {"updated_at": now_iso()}
+    if conv.get("title") == "New conversation":
+        title = message.strip().split("\n")[0][:60]
+        if len(message) > 60:
+            title += "..."
+        updates["title"] = title or "New conversation"
+    await db.conversations.update_one({"id": conv_id, "user_id": user.user_id}, {"$set": updates})
 # ---------- Auth Routes ----------
 @api_router.post("/auth/session")
-async def auth_session(body: SessionExchangeRequest, response: Response):
+async def auth_session(body: SessionExchangeRequest, request: Request, response: Response):
     """Exchange Emergent session_id for our session_token cookie."""
+    if not _origin_allowed(request):
+        raise HTTPException(status_code=403, detail="Forbidden origin")
     async with httpx.AsyncClient(timeout=15.0) as http:
         try:
             r = await http.get(EMERGENT_AUTH_SESSION_URL, headers={"X-Session-ID": body.session_id})
@@ -319,6 +390,8 @@ async def auth_me(user: User = Depends(get_user_from_request)):
 
 @api_router.post("/auth/logout")
 async def auth_logout(request: Request, response: Response, authorization: Optional[str] = Header(None)):
+    if not _origin_allowed(request):
+        raise HTTPException(status_code=403, detail="Forbidden origin")
     token = request.cookies.get("session_token")
     if not token and authorization and authorization.lower().startswith("bearer "):
         token = authorization.split(" ", 1)[1].strip()
@@ -332,6 +405,11 @@ async def auth_logout(request: Request, response: Response, authorization: Optio
 @api_router.get("/")
 async def root():
     return {"message": "Ember is here.", "model": MODEL_NAME}
+
+
+@api_router.get("/health")
+async def health():
+    return {"status": "ok", "model": MODEL_NAME}
 
 
 # Conversations
@@ -382,47 +460,149 @@ async def get_messages(conv_id: str, user: User = Depends(get_user_from_request)
 
 
 # Chat
-async def extract_memories_async(user_id: str, user_text: str, assistant_text: str):
+@api_router.post("/chat")
+async def chat(req: ChatRequest, user: User = Depends(get_user_from_request)):
+    conv, conv_id, user_msg, system_prompt = await _prepare_chat(user, req)
+
     try:
-        extractor = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"memory-extractor-{uuid.uuid4()}",
-            system_message=(
-                "You extract durable facts about a user from a single exchange. "
-                "Return ONLY a JSON array of short fact strings (max 12 words each). "
-                "Facts must be about the USER (preferences, identity, projects, relationships, goals, habits). "
-                "Not about the assistant. Not about general topics. "
-                'If nothing worth remembering, return []. '
-                'Examples: ["Prefers concise answers", "Works as a nurse in Seattle", "Has a dog named Moss"]. '
-                "Never invent. Only extract what's stated or strongly implied."
-            ),
-        ).with_model("anthropic", "claude-haiku-4-5-20251001")
-
-        prompt = f"User said: {user_text}\n\nAssistant replied: {assistant_text}\n\nExtract user facts as JSON array."
-        response = await extractor.send_message(UserMessage(text=prompt))
-
-        text = response.strip()
-        start = text.find('[')
-        end = text.rfind(']')
-        if start == -1 or end == -1:
-            return
-        arr = json.loads(text[start:end + 1])
-        if not isinstance(arr, list):
-            return
-
-        existing = await db.memories.find({"user_id": user_id}, {"_id": 0, "content": 1}).to_list(1000)
-        existing_set = {e['content'].lower().strip() for e in existing}
-
-        for fact in arr:
-            if not isinstance(fact, str):
-                continue
-            fact = fact.strip()
-            if not fact or len(fact) > 200:
-                continue
-            if fact.lower() in existing_set:
-                continue
-            mem = Memory(user_id=user_id, content=fact)
-            await db.memories.insert_one(mem.model_dump())
-            existing_set.add(fact.lower())
+        response_text = await ollama_chat(system_prompt, req.message)
     except Exception as e:
-        logger.warning(f"Memory extraction failed: {e}")
+        logger.error(f"LLM error: {e}")
+        raise HTTPException(500, f"LLM call failed: {str(e)}")
+
+    assistant_msg = Message(user_id=user.user_id, conversation_id=conv_id, role="assistant", content=response_text)
+    await db.messages.insert_one(assistant_msg.model_dump())
+
+    await _update_conv_title(conv, conv_id, user, req.message)
+
+    _schedule(extract_memories_async(user.user_id, req.message, response_text))
+
+    return {
+        "conversation_id": conv_id,
+        "user_message": user_msg.model_dump(),
+        "assistant_message": assistant_msg.model_dump(),
+    }
+
+
+@api_router.post("/chat/stream")
+async def chat_stream(req: ChatRequest, user: User = Depends(get_user_from_request)):
+    """SSE streaming chat. Events: start, message (delta), done, error."""
+    conv, conv_id, user_msg, system_prompt = await _prepare_chat(user, req)
+
+    async def event_stream():
+        yield _sse("start", {"conversation_id": conv_id, "user_message": user_msg.model_dump()})
+        chunks: List[str] = []
+        try:
+            async with httpx.AsyncClient(timeout=180.0) as http:
+                async with http.stream(
+                    "POST",
+                    f"{OLLAMA_URL}/api/chat",
+                    json={
+                        "model": MODEL_NAME,
+                        "stream": True,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": req.message},
+                        ],
+                    },
+                ) as r:
+                    r.raise_for_status()
+                    async for line in r.aiter_lines():
+                        if not line.strip():
+                            continue
+                        data = json.loads(line)
+                        piece = data.get("message", {}).get("content", "")
+                        if piece:
+                            chunks.append(piece)
+                            yield _sse("message", {"delta": piece})
+                        if data.get("done"):
+                            break
+        except Exception as e:
+            logger.error(f"LLM streaming error: {e}")
+            yield _sse("error", {"detail": f"LLM call failed: {str(e)}"})
+            return
+
+        response_text = "".join(chunks)
+        assistant_msg = Message(user_id=user.user_id, conversation_id=conv_id, role="assistant", content=response_text)
+        await db.messages.insert_one(assistant_msg.model_dump())
+
+        await _update_conv_title(conv, conv_id, user, req.message)
+
+        _schedule(extract_memories_async(user.user_id, req.message, response_text))
+
+        yield _sse("done", {"assistant_message": assistant_msg.model_dump()})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# Memory
+@api_router.get("/memory", response_model=List[Memory])
+async def list_memory(user: User = Depends(get_user_from_request)):
+    mems = await db.memories.find({"user_id": user.user_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return mems
+
+
+@api_router.post("/memory", response_model=Memory)
+async def create_memory(body: MemoryCreate, user: User = Depends(get_user_from_request)):
+    content = body.content.strip()
+    if not content:
+        raise HTTPException(400, "Memory cannot be empty")
+    mem = Memory(user_id=user.user_id, content=content)
+    await db.memories.insert_one(mem.model_dump())
+    return mem
+
+
+@api_router.patch("/memory/{mem_id}", response_model=Memory)
+async def update_memory(mem_id: str, body: MemoryUpdate, user: User = Depends(get_user_from_request)):
+    result = await db.memories.find_one_and_update(
+        {"id": mem_id, "user_id": user.user_id},
+        {"$set": {"content": body.content.strip()}},
+        projection={"_id": 0},
+        return_document=True,
+    )
+    if not result:
+        raise HTTPException(404, "Memory not found")
+    return result
+
+
+@api_router.delete("/memory/{mem_id}")
+async def delete_memory(mem_id: str, user: User = Depends(get_user_from_request)):
+    res = await db.memories.delete_one({"id": mem_id, "user_id": user.user_id})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Memory not found")
+    return {"ok": True}
+
+
+# Settings / Persona
+@api_router.get("/settings/persona")
+async def get_persona_route(user: User = Depends(get_user_from_request)):
+    persona = await get_persona(user.user_id)
+    return {"persona": persona, "default": DEFAULT_PERSONA}
+
+
+@api_router.put("/settings/persona")
+async def update_persona(body: PersonaUpdate, user: User = Depends(get_user_from_request)):
+    persona = (body.persona or "").strip()
+    if not persona:
+        persona = DEFAULT_PERSONA
+    if len(persona) > 1000:
+        raise HTTPException(400, "Persona too long (max 1000 chars)")
+    await db.user_settings.update_one(
+        {"user_id": user.user_id},
+        {"$set": {"persona": persona, "updated_at": now_iso()}},
+        upsert=True,
+    )
+    return {"persona": persona}
+
+
+# ---------- App setup ----------
+app.include_router(api_router)
+
+
+@app.on_event("shutdown")
+async def shutdown_db_client():
+    client.close()

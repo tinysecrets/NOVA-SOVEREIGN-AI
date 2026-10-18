@@ -7,19 +7,19 @@ import time
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL")
-if not BASE_URL:
-    fe = "/app/frontend/.env"
-    if os.path.exists(fe):
-        for line in open(fe):
-            if line.startswith("REACT_APP_BACKEND_URL="):
-                BASE_URL = line.split("=", 1)[1].strip()
-                break
-BASE_URL = (BASE_URL or "").rstrip("/")
-API = f"{BASE_URL}/api"
+BASE_URL = (os.environ.get("EMBER_TEST_API_URL") or "").rstrip("/")
+ALLOW_MUTATIONS = os.environ.get("EMBER_TEST_ALLOW_MUTATIONS") == "1"
+API = f"{BASE_URL}/api" if BASE_URL else ""
 
 TOKEN_A = os.environ.get("TOKEN_A")
 TOKEN_B = os.environ.get("TOKEN_B")
+pytestmark = pytest.mark.skipif(
+    not BASE_URL or not ALLOW_MUTATIONS or not TOKEN_A or not TOKEN_B,
+    reason=(
+        "auth integration tests require EMBER_TEST_API_URL, "
+        "EMBER_TEST_ALLOW_MUTATIONS=1, and seeded TOKEN_A/TOKEN_B on a disposable test API"
+    ),
+)
 
 
 def _auth(t):
