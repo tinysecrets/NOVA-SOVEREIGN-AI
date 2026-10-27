@@ -18,6 +18,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 
 start_backend() {
   local name="$1" dir="$2" port="$3"
+  local host="${4:-0.0.0.0}"
   local log="${LOG_DIR}/${name}-api.log"
   local pidf="${PID_DIR}/${name}-api.pid"
 
@@ -43,7 +44,7 @@ start_backend() {
     if ! "$py" -c "import uvicorn" 2>/dev/null; then
       echo "[!!]  ${name}: uvicorn missing in ${py}. Run ./scripts/bootstrap.sh" >&2
     fi
-    nohup "$py" -m uvicorn server:app --host 0.0.0.0 --port "$port" \
+    nohup "$py" -m uvicorn server:app --host "$host" --port "$port" \
       >"$log" 2>&1 &
     echo $! >"$pidf"
   )
@@ -86,6 +87,7 @@ SOVEREIGN_FE="${ROOT}/nova/apps/sovereign/frontend"
 SIDEKICK_BE="${ROOT}/nova/apps/sidekick/backend"
 SIDEKICK_FE="${ROOT}/nova/apps/sidekick/frontend"
 CORE_BE="${ROOT}/nova/apps/core/backend"
+RECRUITER_BE="${ROOT}/nova/apps/recruiter"
 
 [ -f "${SOVEREIGN_BE}/server.py" ] || SOVEREIGN_BE="${ROOT}/archive/legacy/NOVA-SOVERIGN/backend"
 [ -f "${SOVEREIGN_FE}/package.json" ] || SOVEREIGN_FE="${ROOT}/archive/legacy/NOVA-SOVERIGN/frontend"
@@ -107,6 +109,7 @@ fi
 start_backend "sovereign" "$SOVEREIGN_BE" 8000
 start_backend "sidekick"  "$SIDEKICK_BE"  8001
 start_backend "core"      "$CORE_BE"      8002
+start_backend "recruiter" "$RECRUITER_BE" 8003 127.0.0.1
 
 if have npm; then
   start_frontend "sovereign" "$SOVEREIGN_FE" 3000 "npm start"
@@ -122,6 +125,7 @@ echo " Sidekick UI    http://localhost:5173"
 echo " Sovereign API  http://localhost:8000"
 echo " Sidekick API   http://localhost:8001"
 echo " Core API       http://localhost:8002"
+echo " Recruiter API  http://localhost:8003"
 echo ""
 echo " Health check:  ./scripts/health-check.sh"
 echo " Stop all:      ./scripts/stop-all.sh"

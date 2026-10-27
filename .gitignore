@@ -22,3 +22,8 @@ scripts/logs/pids/
 
 .venv/
 venv/
+
+# Recruiter worker state (never commit prospect data / sends)
+nova/apps/recruiter/data/
+nova/apps/recruiter/*.env
+!nova/apps/recruiter/.env.example

@@ -1,30 +1,32 @@
-# Free model map — OpenRouter :free primary, Ollama local fallback.
-default_backend: openrouter_free
+# Model map — Nous Hermes combo (paid/PAYG via OpenRouter), Ollama local fallback.
+# Not the crippled OpenRouter :free tier: Hermes 4 70B ~ $0.13/M in, $0.40/M out.
+# The recruiter worker (nova/apps/recruiter) reads roles from its own config,
+# but keeps this shared map in sync.
+default_backend: openrouter
 
 openrouter:
-  default: nvidia/nemotron-nano-9b-v2:free
-  # Only *:free IDs are allowed by the API enforcer.
+  default: nousresearch/hermes-4-70b
   roles:
-    genie: openrouter/free
-    research: nvidia/nemotron-nano-9b-v2:free
-    design: nvidia/nemotron-nano-9b-v2:free
-    code: nvidia/nemotron-nano-9b-v2:free
-    qa: nvidia/nemotron-nano-9b-v2:free
-    report: nvidia/nemotron-nano-9b-v2:free
-    integration: nvidia/nemotron-nano-9b-v2:free
-    repair: nvidia/nemotron-nano-9b-v2:free
+    genie: nousresearch/hermes-4-70b      # supervisor; use hermes-4-405b for high-stakes
+    research: nousresearch/hermes-4-70b
+    design: nousresearch/hermes-4-70b
+    code: nousresearch/hermes-4-70b
+    qa: nousresearch/hermes-4-70b
+    report: nousresearch/hermes-4-70b
+    integration: nousresearch/hermes-4-70b
+    repair: nousresearch/hermes-4-70b
 
 ollama:
   host: http://127.0.0.1:11434
   num_predict: 4096
-  default: qwen2.5:1.5b
+  default: hermes3:8b
   roles:
-    genie: qwen2.5:1.5b
-    research: qwen2.5:1.5b
-    design: qwen2.5:1.5b
-    code: qwen2.5:1.5b
-    qa: qwen2.5:1.5b
-    report: qwen2.5:1.5b
-    integration: qwen2.5:1.5b
-    repair: qwen2.5:1.5b
-    sidekick: qwen2.5:1.5b
+    genie: hermes3:8b
+    research: hermes3:8b
+    design: hermes3:8b
+    code: hermes3:8b
+    qa: hermes3:8b
+    report: hermes3:8b
+    integration: hermes3:8b
+    repair: hermes3:8b
+    sidekick: hermes3:8b

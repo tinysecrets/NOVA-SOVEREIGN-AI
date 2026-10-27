@@ -95,6 +95,7 @@ setup_backend  "sidekick"  "$ROOT/nova/apps/sidekick/backend"
 setup_frontend "sidekick"  "$ROOT/nova/apps/sidekick/frontend"
 setup_backend  "core"      "$ROOT/nova/apps/core/backend"
 setup_frontend "core"      "$ROOT/nova/apps/core/frontend"
+setup_backend  "recruiter" "$ROOT/nova/apps/recruiter"
 
 chmod +x "$ROOT/scripts/"*.sh 2>/dev/null || true
 

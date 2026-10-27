@@ -1,0 +1,100 @@
+# Recruiter — Wah-Lah player acquisition worker
+#
+# Policies edited here; identity/keys live in .env.
+# The worker runs specialty agents in-hierarchy (write -> qa -> repair -> report)
+# and reports upward to the Boss via Resend when it truly needs a human.
+
+channel:
+  email:
+    enabled: true
+    min_interval_hours: 24          # min gap before a prospect may be retried
+    max_attempts: 2
+  discord:
+    enabled: false                  # only DM users who opted in via the bot
+    min_interval_hours: 24
+    max_attempts: 1
+  telegram:
+    enabled: false
+    min_interval_hours: 24
+    max_attempts: 1
+
+traffic:
+  app: https://app.wah-lah.com
+  home: https://wah-lah.com
+  socials:
+    # official handles the copy may link to
+    - https://wah-lah.com
+
+copy:
+  tone: "friendly, honest, Calm. No hype, no pressure, no urgency."
+  subject_max: 70
+  body_max_chars: 900
+  cta_label: "Join on wah-lah.com"
+  ai_disclosure: true               # honest: say an AI assistant drafted it
+
+compliance:
+  postal_address: ""                # REQUIRED before live email (CAN-SPAM)
+  honor_optout_within_days: 1
+  add_list_unsubscribe: true
+  # Patterns that would violate law / platform rules / safety. Hard-blocked.
+  banned_patterns:
+    - "guaranteed win"
+    - "guaranteed to win"
+    - "you have won"
+    - "you won"
+    - "your prize"
+    - "must buy"
+    - "must purchase"
+    - "buy credits to"
+    - "pay to play"
+    - "100% win"
+    - "no risk"
+    - "get rich"
+    - "money laundering"
+    - "best price ever"
+    - "act now"
+    - "limited time only"
+    - "last chance"
+    - "one time offer"
+    - "secret"
+    - "hidden fees"
+    - "fees apply"
+    - "password"
+    - "your bank account"
+    - "investment"
+    - "gambling"
+    - "bet now"
+    - "jackpot guaranteed"
+  # Hard-blocked in subject (shorter list so copy keeps a natural voice)
+  banned_subject_patterns:
+    - "won"
+    - "prize"
+    - "guaranteed"
+    - "!!"
+    - "act now"
+    - "urgent"
+    - "last chance"
+  sweepstakes_note: "Sweepstakes-style platform, free to enter, no purchase necessary."
+
+escalations:
+  boss_email: jrs092393@gmail.com
+  alert_on: [optout_burst, bounce_burst, qa_p0, budget_exceeded, exception, gate_required]
+  optout_burst_threshold: 5         # per day
+  bounce_burst_threshold: 5         # per day
+
+approval:
+  gate: true                        # human approves the first cohort before sends
+  gate_review_href: https://app.wah-lah.com
+
+models:
+  routine: nousresearch/hermes-4-70b
+  high: nousresearch/hermes-4-405b
+  ollama_fallback: hermes3:8b
+  max_tokens_draft: 900
+  max_tokens_qa: 600
+  budget_tokens_per_day: 500000     # soft ceiling, escalates when hit
+
+schedule:
+  heartbeat_sec: 3600
+  daily_cap: 50
+  max_per_hour: 15

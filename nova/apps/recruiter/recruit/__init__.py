@@ -1,0 +1,1 @@
+"""Recruiter package — Wah-Lah player acquisition worker."""
