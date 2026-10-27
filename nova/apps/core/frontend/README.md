@@ -1,70 +1,17 @@
-# Getting Started with Create React App
+# NOVA Core Frontend (Ember)
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+React 19 single-page app built with Vite 8, the React plugin, and Tailwind CSS 4. The API base comes from VITE_BACKEND_URL; when unset it defaults to http://127.0.0.1:8002.
 
-## Available Scripts
+The Emergent builder badge/script and unconditional PostHog telemetry have been removed. There is no frontend analytics SDK enabled in this build. Google Fonts are still referenced for the app's typefaces.
 
-In the project directory, you can run:
+## Local development
 
-### `npm start`
+From this directory, install the locked dependencies with npm ci, then run npm run dev -- --host 127.0.0.1 --port 3002. The default is loopback-only; use a trusted Tailscale IP only when intentionally exposing this app to the private tailnet.
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+## Release checks
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+- npm run build — production bundle
+- npm test — Node test discovery (there are currently no frontend test files)
+- npm audit --audit-level=low — dependency audit
 
-### `npm test`
-
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
-
-### `npm run build`
-
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
-
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
-
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
-
-### `npm run eject`
-
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
-
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
-
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+The canonical all-app runner is ../../../../scripts/start-all.sh; it supplies the bind host and VITE_BACKEND_URL, starts the Core API on port 8002 and this UI on port 3002, and keeps recruiter API on loopback.

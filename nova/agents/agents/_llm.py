@@ -38,6 +38,9 @@ def _load_yaml(p: Path) -> dict:
 
 
 def _openrouter_chat(model: str, system: str, user: str, temperature: float, key: str) -> str:
+    candidate = str(model or "").strip()
+    if not candidate.lower().endswith(":free") or candidate.lower().startswith("google/"):
+        raise RuntimeError("NOVA free-first policy rejected a non-free or Google OpenRouter model")
     from openai import OpenAI
 
     client = OpenAI(
@@ -117,32 +120,6 @@ def _hf_chat(model: str, system: str, user: str, token: str) -> str:
     return json.dumps(data)
 
 
-def _gemini_chat(
-    model: str,
-    system: str,
-    user: str,
-    temperature: float,
-    token: str,
-) -> str:
-    """Google AI Studio (Gemini) free tier."""
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{model}:generateContent?key={token}"
-    )
-    body = {
-        "systemInstruction": {"parts": [{"text": system}]},
-        "contents": [{"role": "user", "parts": [{"text": user}]}],
-        "generationConfig": {"temperature": temperature},
-    }
-    r = requests.post(url, json=body, timeout=120)
-    r.raise_for_status()
-    data = r.json()
-    try:
-        return data["candidates"][0]["content"]["parts"][0]["text"]
-    except (KeyError, IndexError):
-        return json.dumps(data)
-
-
 def chat(role: str, user: str, vault_env: Optional[dict] = None) -> LLMResponse:
     """
     `role` is a key in agents.yaml.
@@ -165,16 +142,15 @@ def chat(role: str, user: str, vault_env: Optional[dict] = None) -> LLMResponse:
     vault_env = vault_env or {}
     backend = models.get("default_backend", "ollama")
 
-    # Auto-escalate to free cloud tier if token is present in the vault.
-    # Gemini first (best free reasoning), then Groq (fastest), then HF.
-    if vault_env.get("GEMINI_API_KEY"):
-        backend = "gemini"
+    # Free-first routing: prefer the explicit OpenRouter :free pool, then other
+    # owner-opted-in free-tier providers. There is no Google/Gemini route; with no
+    # cloud token the backend remains local Ollama.
+    if vault_env.get("OPENROUTER_API_KEY"):
+        backend = "openrouter"
     elif vault_env.get("GROQ_API_KEY"):
         backend = "groq"
     elif vault_env.get("HF_TOKEN"):
         backend = "huggingface"
-    elif vault_env.get("OPENROUTER_API_KEY"):
-        backend = "openrouter"
 
     if backend == "ollama":
         entry = models["ollama"][model_key]
@@ -193,13 +169,6 @@ def chat(role: str, user: str, vault_env: Optional[dict] = None) -> LLMResponse:
                 "cloud token with scripts/set_token.py."
             ) from exc
         return LLMResponse(text=text, backend="ollama", model=entry["model"])
-    if backend == "gemini":
-        m = models["gemini"]["models"]["fast"]
-        return LLMResponse(
-            text=_gemini_chat(m, system_prompt, user, 0.3, vault_env["GEMINI_API_KEY"]),
-            backend="gemini",
-            model=m,
-        )
     if backend == "groq":
         m = models["groq"]["models"]["fast"]
         return LLMResponse(

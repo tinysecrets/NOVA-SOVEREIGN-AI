@@ -1,7 +1,5 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
+@import "tailwindcss";
+@config "../tailwind.config.js";
 :root {
     --font-heading: "Cormorant Garamond", serif;
     --font-body: "Outfit", sans-serif;

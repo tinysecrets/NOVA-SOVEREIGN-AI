@@ -46,7 +46,10 @@ venv_ok() {
   local dir="$1"
   local py="${dir}/.venv/bin/python"
   [ -x "$py" ] || return 1
-  "$py" -c "import sys" 2>/dev/null || return 1
+  # Validate isolation and ensure the pip wrapper's embedded interpreter path still works.
+  "$py" -c 'import pathlib, sys; expected = pathlib.Path(sys.argv[1]).resolve(); current = pathlib.Path(sys.prefix).resolve(); assert sys.prefix != sys.base_prefix; assert current == expected' "${dir}/.venv" >/dev/null 2>&1 || return 1
+  "$py" -m pip --version >/dev/null 2>&1 || return 1
+  "${dir}/.venv/bin/pip" --version >/dev/null 2>&1 || return 1
   return 0
 }
 
@@ -82,7 +85,11 @@ setup_frontend() {
   (
     cd "$dir"
     if [ ! -d node_modules ]; then
-      npm install --legacy-peer-deps >/dev/null 2>&1 || npm install >/dev/null
+      if [ -f package-lock.json ]; then
+        npm ci --no-audit --no-fund
+      else
+        npm install --no-audit --no-fund
+      fi
     fi
   )
   ensure_env "${dir}/.env.example" "${dir}/.env"

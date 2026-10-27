@@ -1,6 +1,6 @@
 """End-to-end backend tests for Ember API.
 
-Covers: health, conversations CRUD, chat (Claude Sonnet 4.5),
+Covers: health, conversations CRUD, chat with the configured local Ollama model,
 multi-turn memory, auto-titling, memory CRUD, auto-extraction.
 """
 import os
@@ -8,17 +8,17 @@ import time
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL")
-if not BASE_URL:
-    # fallback: parse from frontend/.env
-    fe = "/app/frontend/.env"
-    if os.path.exists(fe):
-        for line in open(fe):
-            if line.startswith("REACT_APP_BACKEND_URL="):
-                BASE_URL = line.split("=", 1)[1].strip()
-                break
-BASE_URL = (BASE_URL or "").rstrip("/")
-API = f"{BASE_URL}/api"
+BASE_URL = (os.environ.get("EMBER_TEST_API_URL") or "").rstrip("/")
+ALLOW_MUTATIONS = os.environ.get("EMBER_TEST_ALLOW_MUTATIONS") == "1"
+pytestmark = pytest.mark.skipif(
+    not BASE_URL or not ALLOW_MUTATIONS,
+    reason=(
+        "integration tests mutate API data and may call a model-backed endpoint; "
+        "set EMBER_TEST_API_URL to a disposable test API and "
+        "EMBER_TEST_ALLOW_MUTATIONS=1 to opt in"
+    ),
+)
+API = f"{BASE_URL}/api" if BASE_URL else ""
 
 
 @pytest.fixture(scope="session")
@@ -35,7 +35,7 @@ class TestHealth:
         assert r.status_code == 200
         data = r.json()
         assert "model" in data
-        assert "claude-sonnet-4-5" in data["model"]
+        assert isinstance(data["model"], str) and data["model"]
 
 
 # --- Conversations CRUD ---

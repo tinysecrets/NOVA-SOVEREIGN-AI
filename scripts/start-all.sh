@@ -16,6 +16,13 @@ echo "======================================"
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# The API includes agent tools. Bind to the authorized tailnet interface when available;
+# otherwise use loopback. Never default to a LAN/WAN wildcard bind.
+source "$ROOT/scripts/lib/bind-host.sh"
+NOVA_BIND_HOST="$(nova_bind_host "${NOVA_BIND_HOST:-}")" || exit 1
+export NOVA_BIND_HOST
+echo " API/UI bind host: $NOVA_BIND_HOST"
+
 start_backend() {
   local name="$1" dir="$2" port="$3"
   local host="${4:-0.0.0.0}"
@@ -32,7 +39,7 @@ start_backend() {
     return 0
   fi
 
-  echo "[..]  Starting ${name} API on :${port}"
+  echo "[..]  Starting ${name} API on ${host}:${port}"
   (
     cd "$dir"
     local py="python3"
@@ -66,15 +73,25 @@ start_frontend() {
     return 0
   fi
 
-  echo "[..]  Starting ${name} UI on :${port}"
+  echo "[..]  Starting ${name} UI on ${NOVA_BIND_HOST}:${port}"
   (
     cd "$dir"
+    export HOST="$NOVA_BIND_HOST"
+    case "$name" in
+      sovereign) export VITE_BACKEND_URL="${VITE_BACKEND_URL:-http://${NOVA_BIND_HOST}:8000}" ;;
+      sidekick) export VITE_BACKEND_URL="${VITE_BACKEND_URL:-http://${NOVA_BIND_HOST}:8001}" ;;
+      core) export VITE_BACKEND_URL="${VITE_BACKEND_URL:-http://${NOVA_BIND_HOST}:8002}" ;;
+    esac
     if [ ! -d node_modules ]; then
-      npm install --legacy-peer-deps >/dev/null 2>&1 || npm install >/dev/null 2>&1 || true
+      if [ -f package-lock.json ]; then
+        npm ci --no-audit --no-fund
+      else
+        npm install --no-audit --no-fund
+      fi
     fi
     export PORT="$port"
     export BROWSER=none
-    # Vite uses --port; CRA uses PORT env
+    # Vite uses explicit --host and --port arguments
     nohup bash -lc "$cmd" >"$log" 2>&1 &
     echo $! >"$pidf"
   )
@@ -105,15 +122,16 @@ fi
 
 # Ports (canonical finished stack)
 #   Sovereign API 8000  |  Sidekick API 8001  |  Core API 8002
-#   Sovereign UI  3000  |  Sidekick UI  5173
+#   Sovereign UI  3000  |  Sidekick UI  5173  |  Core UI 3002
 start_backend "sovereign" "$SOVEREIGN_BE" 8000
 start_backend "sidekick"  "$SIDEKICK_BE"  8001
 start_backend "core"      "$CORE_BE"      8002
 start_backend "recruiter" "$RECRUITER_BE" 8003 127.0.0.1
 
 if have npm; then
-  start_frontend "sovereign" "$SOVEREIGN_FE" 3000 "npm start"
-  start_frontend "sidekick"  "$SIDEKICK_FE"  5173 "npm run dev -- --host 0.0.0.0 --port 5173"
+  start_frontend "sovereign" "$SOVEREIGN_FE" 3000 "npm run dev -- --host ${NOVA_BIND_HOST} --port 3000"
+  start_frontend "sidekick"  "$SIDEKICK_FE"  5173 "npm run dev -- --host ${NOVA_BIND_HOST} --port 5173"
+  start_frontend "core"      "${ROOT}/nova/apps/core/frontend" 3002 "npm run dev -- --host ${NOVA_BIND_HOST} --port 3002"
 fi
 
 echo ""
